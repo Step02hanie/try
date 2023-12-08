@@ -1,0 +1,206 @@
+import cv2
+import mediapipe as mp
+from PIL import Image, ImageDraw
+import numpy as np
+import os
+
+def load_images_from_folder(folder_path):
+    images = []
+    for filename in os.listdir(folder_path):
+        if filename.endswith(".png"):
+            image_path = os.path.join(folder_path, filename)
+            image = Image.open(image_path)
+            images.append(image)
+    return images
+
+def select_clothing(images, prompt):
+    print("Available options:")
+    for i, img in enumerate(images):
+        print(f"{i + 1}. {os.path.basename(img.filename)}")
+
+    while True:
+        try:
+            choice = int(input(prompt)) - 1
+            if 0 <= choice < len(images):
+                return images[choice]
+            else:
+                print("Invalid choice. Please enter a valid number.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+
+def try_virtual_fitting_room(clothes_folder, pant_folder, hat_folder):
+    # Load the images of the glasses, upper body clothes, and lower body clothes
+    #glasses_image = Image.open("glasses1.png")
+    # Load the images of clothes, pants, and hat
+    clothes_images = load_images_from_folder(clothes_folder)
+    pant_images = load_images_from_folder(pant_folder)
+    hat_images = load_images_from_folder(hat_folder)
+
+    # Let users select different clothes interactively
+    upper_body_clothes_image = select_clothing(clothes_images, "Choose upper body clothes (enter a number): ")
+    lower_body_clothes_image = select_clothing(pant_images, "Choose lower body clothes (enter a number): ")
+    hat_image = select_clothing(hat_images, "Choose hat (enter a number): ")
+
+    # Initialize Mediapipe Face Detection and Pose Detection
+    mp_face_detection = mp.solutions.face_detection
+    mp_pose = mp.solutions.pose
+    mp_drawing = mp.solutions.drawing_utils
+
+    cap = cv2.VideoCapture(0)
+
+    with mp_face_detection.FaceDetection(
+        min_detection_confidence=0.5) as face_detection, mp_pose.Pose() as pose_detection:
+        while True:
+            ret, frame = cap.read()
+            height, width, _ = frame.shape
+
+            # Convert the BGR image to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Process the image with Mediapipe Face Detection
+            face_results = face_detection.process(rgb_frame)
+
+            # Process the image with Mediapipe Pose Detection
+            pose_results = pose_detection.process(rgb_frame)
+
+            # if face_results.detections:
+            #     for detection in face_results.detections:
+            #         bboxC = detection.location_data.relative_bounding_box
+            #         ih, iw, _ = frame.shape
+            #         x, y, w, h = int(bboxC.xmin * iw), int(bboxC.ymin * ih), \
+            #                      int(bboxC.width * iw), int(bboxC.height * ih)
+
+            #         left_eye = [(int(x + w * 0.2), int(y + h * 0.4)),
+            #                     (int(x + w * 0.35), int(y + h * 0.4))]
+            #         right_eye = [(int(x + w * 0.65), int(y + h * 0.4)),
+            #                      (int(x + w * 0.8), int(y + h * 0.4))]
+
+            #         # Check if both eyes are detected before displaying glasses
+            #         if all(0 <= coord[0] < width and 0 <= coord[1] < height for eye in [left_eye, right_eye] for coord in eye):
+            #             # Calculate the width and height of the glasses image
+            #             glasses_width = right_eye[1][0] - left_eye[0][0]
+            #             glasses_height = int(h * 0.15)  # Adjusted glasses height
+
+            #             # Resize the glasses image to fit the face
+            #             glasses_resized = glasses_image.resize((glasses_width, glasses_height))
+
+            #             # Calculate the position to overlay the glasses on the face
+            #             glasses_x, glasses_y = left_eye[0][0], left_eye[0][1] - int(h * 0.05)  # Adjusted glasses position
+
+            #             # Paste the glasses onto the frame
+            #             frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            #             frame_pil.paste(glasses_resized, (glasses_x, glasses_y), glasses_resized)
+
+            #             # Convert the frame back to OpenCV format
+            #             frame_with_glasses = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
+
+            #             # Display the result
+            #             cv2.imshow("Virtual Fitting Room", frame_with_glasses)
+
+            if pose_results.pose_landmarks:
+                pose_landmarks = pose_results.pose_landmarks.landmark
+
+                # Calculate the position of the upper body clothes based on pose landmarks
+                left_shoulder_x = pose_landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER].x*width
+                left_shoulder_y = pose_landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER].y*height
+
+                right_shoulder_x = pose_landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER].x*width
+                right_shoulder_y = pose_landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER].y*height
+
+                center_x = int((left_shoulder_x + right_shoulder_x) / 2)
+                center_y = int((left_shoulder_y + right_shoulder_y) / 2)
+
+                #Define a vertical offset to move the upper clothes lower 
+                vertical_offset = 70
+                upper_clothes_x = center_x
+                upper_clothes_y = center_y + vertical_offset
+
+                # Calculate the width and height of the upper body clothes image
+                upper_clothes_width = int(width * 0.4)
+                upper_clothes_height = int(height * 0.4)
+
+                # Resize the upper body clothes image to fit the upper body
+                upper_clothes_resized = upper_body_clothes_image.resize(
+                    (upper_clothes_width, upper_clothes_height))
+
+                # Calculate the position to overlay the upper body clothes on the frame
+                upper_clothes_x, upper_clothes_y = int(upper_clothes_x - upper_clothes_width/2), int(upper_clothes_y - upper_clothes_height/2)
+
+                # Paste the upper body clothes onto the frame
+                frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                frame_pil.paste(upper_clothes_resized, (upper_clothes_x, upper_clothes_y),
+                                upper_clothes_resized)
+
+                # Calculate the position of the lower body clothes based on pose landmarks
+                left_hip_x = pose_landmarks[mp_pose.PoseLandmark.LEFT_HIP].x*width
+                left_hip_y = pose_landmarks[mp_pose.PoseLandmark.LEFT_HIP].y*height
+
+                right_hip_x = pose_landmarks[mp_pose.PoseLandmark.RIGHT_HIP].x*width
+                right_hip_y = pose_landmarks[mp_pose.PoseLandmark.RIGHT_HIP].y*height
+
+                center_x = int((left_hip_x + right_hip_x) / 2)
+                center_y = int((left_hip_y + right_hip_y) / 2)
+
+                #Define a vertical offset to move the upper clothes lower 
+                vertical_offset = 70
+                lower_clothes_x = center_x
+                lower_clothes_y = center_y + vertical_offset
+
+                # Calculate the width and height of the lower body clothes image
+                lower_clothes_width = int(width * 0.4)
+                lower_clothes_height = int(height * 0.5)
+
+                # Resize the lower body clothes image to fit the lower body
+                lower_clothes_resized = lower_body_clothes_image.resize(
+                    (lower_clothes_width, lower_clothes_height))
+
+                # Calculate the position to overlay the lower body clothes on the frame
+                lower_clothes_x, lower_clothes_y = int(lower_clothes_x - lower_clothes_width/2), int(lower_clothes_y - lower_clothes_height/2)
+
+                # Paste the lower body clothes onto the frame
+                frame_pil.paste(lower_clothes_resized, (lower_clothes_x, lower_clothes_y),
+                                lower_clothes_resized)
+
+                # Calculate the position of the hat based on pose landmarks
+                head_landmark_x = int(pose_landmarks[mp_pose.PoseLandmark.NOSE].x * width)
+                head_landmark_y = int(pose_landmarks[mp_pose.PoseLandmark.NOSE].y * height)
+               
+                # Define a vertical offset to move the hat higher 
+                vertical_offset = -100
+                hat_x = head_landmark_x - 70
+                hat_y = head_landmark_y + vertical_offset
+
+                # Calculate the width and height of the hat image
+                hat_width = int(width * 0.2)
+                hat_height = int(height * 0.15)
+
+                # Resize the hat image to fit the head
+                hat_resized = hat_image.resize((hat_width, hat_height))
+
+                # Paste the hat onto the frame
+                frame_pil.paste(hat_resized, (hat_x, hat_y), hat_resized)
+
+                # Convert the frame back to OpenCV format
+                frame_with_items = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
+
+                # Display the result
+                cv2.imshow("Virtual Fitting Room", frame_with_items)
+
+            if cv2.waitKey(1) != -1:  # Break the loop if any key is pressed
+                break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    # Specify the folders containing clothes, hats, and pants images
+    clothes_folder = r"C:\Users\Acer\Desktop\Airost\clothes_folder"
+    hat_folder = r"C:\Users\Acer\Desktop\Airost\hat_folder"
+    pant_folder = r"C:\Users\Acer\Desktop\Airost\pant_folder"
+
+    choice = input("Do you want to open the webcam? (yes/no): ").lower()
+    
+    if choice == "yes":
+        try_virtual_fitting_room(clothes_folder, pant_folder, hat_folder)
+    else:
+        print("Exiting the program.")
